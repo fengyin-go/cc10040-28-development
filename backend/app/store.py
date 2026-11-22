@@ -28,6 +28,8 @@ class Store:
         self._anomaly_records: list[dict[str, Any]] = []
         # Recalc history
         self._recalc_history: list[dict[str, Any]] = []
+        # Governed pivot analysis cells (one per prepared window)
+        self._analysis_cells: dict[str, dict[str, Any]] = {}
         # Lock for thread safety
         self._lock = threading.Lock()
 
@@ -243,6 +245,26 @@ class Store:
             "lineage": lineage,
             "depth": len(lineage),
         }
+
+    # ── Governed pivot analysis cells ──
+
+    def save_analysis_cell(self, cell_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            self._analysis_cells[cell_id] = dict(payload)
+            return dict(payload)
+
+    def get_analysis_cell(self, cell_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            cell = self._analysis_cells.get(cell_id)
+            return dict(cell) if cell is not None else None
+
+    def analysis_cells(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(cell) for cell in self._analysis_cells.values()]
+
+    def clear_analysis_cells(self) -> None:
+        with self._lock:
+            self._analysis_cells.clear()
 
 
 store = Store()

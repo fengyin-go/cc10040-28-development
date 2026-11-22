@@ -71,6 +71,50 @@ npm run dev
 | 口径重算引擎 | `recalc_engine` | 重算任务 | 关联指标、新口径版本、历史时间范围 |
 | 字段血缘 | `field_lineage` | 字段血缘 | 目标字段、来源字段列表、转换逻辑 |
 
+## 受控透视（按读者授权限制上卷/下钻）
+
+透视表配置除保存行列轴外，还能按读者授权生成受控透视网格。核心约束：
+
+- 事实表按 `区域 / 区 / 门店` 三级地理层级组织，读者授权为
+  `最大可见层级 + 可见范围`，层级数字越大越细（1=区域，2=区，3=门店）。
+- **统一裁剪**：行轴、列轴、交叉格、行/列小计和总计都基于同一份已授权事实行
+  计算。请求超出层级的轴会被裁剪成读者可见的层级，未配置/未开放的轴不产生任何
+  格值，避免用交叉格反推门店值。
+- **授权 revision**：每次收紧授权都会追加一个新 revision，历史 revision 原样保留。
+  分析任务分为"准备行列"和"计算"两个阶段，准备阶段钉住当时的授权快照，计算阶段
+  绝不改用最新授权。结果里带 `auth_revision`、`snapshot_id` 和 `superseded`，
+  因此同一分析员的两个窗口能分别自证对应哪次授权。
+- **下钻核对**：下钻按结果声明的层级重算，层级必须等于授权裁剪后的层级；越权或
+  层级不符一律拒绝，且不返回任何门店级明细。
+
+后端入口（`backend/app/services/`）：
+
+| 文件 | 职责 |
+| --- | --- |
+| `access_control.py` | 授权 revision 注册表、不可变 `AuthSnapshot`、收紧校验 |
+| `analytics_facts.py` | 门店×品类事实表与层级聚合 |
+| `governed_pivot.py` | 受控透视网格、未开放轴封锁、下钻核对 |
+| `governed_analysis.py` | 准备/计算两阶段分析任务、双窗口对比 |
+| `routers/governed.py` | `/api/governed/*` 接口 |
+
+常用接口：
+
+```bash
+# 当前读者与层级
+curl http://127.0.0.1:8015/api/governed/readers
+# 按读者授权生成受控网格（门店轴会被裁剪到区）
+curl "http://127.0.0.1:8015/api/governed/matrix?reader=reader_district&row_dimension=门店&col_dimension=品类"
+# 重新进入模型，核对获准维度与小计层级
+curl "http://127.0.0.1:8015/api/governed/pivot/5/dimensions?reader=reader_district"
+# 双窗口 + 中途收紧门店权限的完整演示
+curl -X POST http://127.0.0.1:8015/api/governed/scenario/concurrent-tighten \
+  -H 'Content-Type: application/json' \
+  -d '{"reader":"analyst_a","config_id":5,"tighten_level":2}'
+```
+
+前端在左侧导航的「受控透视」（`/governed-pivot`）页面展示读者层级、受控网格、
+revision 历史，以及双窗口收紧演示和下钻核对结果。
+
 ## 约定
 
 - 全部模块共享`frontend/src/views/WorkbenchView.vue|tsx`和一套资源路由。
